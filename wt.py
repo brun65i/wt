@@ -1,8 +1,9 @@
 import argparse
 import os
+import sys
 from pathlib import Path
 
-from git import Repo
+from git import GitCommandError, Repo
 from iterfzf import iterfzf
 
 from utils import logger
@@ -12,30 +13,32 @@ def get_repo() -> Repo:
     return Repo(Path.cwd(), search_parent_directories=True)
 
 
-def get_bare_worktree_path(repo: Repo) -> str:
+def get_bare_worktree_path(repo: Repo) -> Path | None:
     for worktree in repo.git.worktree("list").splitlines():
         if "(bare)" in worktree:
-            return worktree.split()[0]
+            return Path(worktree.split()[0])
     raise ValueError("No bare worktree found")
 
 
-def list_worktrees(repo: Repo) -> None:
-    print(repo.git.worktree("list"))
+def list_worktrees(repo: Repo) -> str:
+    return repo.git.worktree("list")
 
 
-def add_worktree(args: argparse.Namespace, repo: Repo) -> str:
+# TODO: chdir to the bare_path does not affect the next line git command
+def add_worktree(args: argparse.Namespace, repo: Repo) -> Path:
     bare_path = get_bare_worktree_path(repo)
+    logger.info(f"The bare path found: {bare_path}")
     os.chdir(bare_path)
     repo.git.worktree("add", *args.path)
-    os.chdir(args.path[0])
+    os.chdir(bare_path / args.path[0])
     logger.info("Fetching changes")
     repo.remotes.origin.fetch(all=True)
     logger.info("Merging with master")
     repo.git.merge("origin/master")
-    return os.getcwd()
+    return Path.cwd()
 
 
-def select_worktree(repo: Repo, exclude_bare: bool = True) -> str:
+def select_worktree(repo: Repo, exclude_bare: bool = True) -> Path | str:
     worktrees = repo.git.worktree("list").splitlines()
     options = [line for line in worktrees if not ("(bare)" in line and exclude_bare)]
     if not options:
@@ -43,43 +46,45 @@ def select_worktree(repo: Repo, exclude_bare: bool = True) -> str:
         return ""
     try:
         choice = iterfzf(options, prompt="Select worktree > ")
-        return choice.split()[0] or ""
+        return Path(choice.split()[0])
     except KeyboardInterrupt:
         return ""
 
 
-def remove_worktree(args: argparse.Namespace, repo: Repo) -> str:
+# TODO: check if there are modified or untracked files before removing
+def remove_worktree(args: argparse.Namespace, repo: Repo) -> Path:
     bare_path = get_bare_worktree_path(repo)
     if args.all:
         os.chdir(bare_path)
         worktrees = repo.git.worktree("list").splitlines()
         for line in worktrees:
-            if "bare" in line or "master" in line:
+            if "(bare)" in line or "master" in line:
                 continue
             dir_path = line.split()[0]
-            repo.git.worktree("remove", dir_path)
+            try:
+                repo.git.worktree("remove", dir_path)
+            except GitCommandError:
+                logger.exception("Failed to remove worktree", exc_info=True)
+        return bare_path
     else:
         dir_path = select_worktree(repo)
+        cwd_path = Path.cwd()
         if dir_path:
-            if os.getcwd() == dir_path:
-                os.chdir(bare_path)
             logger.info(f"Removing worktree: {dir_path}")
             repo.git.worktree("remove", dir_path)
-    return bare_path
+            return bare_path if dir_path.name == cwd_path.name else cwd_path
 
 
-def switch_worktree(repo: Repo) -> str:
+def switch_worktree(repo: Repo) -> Path:
     dir_path = select_worktree(repo)
     if dir_path:
-        logger.info(f"Changing current worktree: {os.path.basename(dir_path)}")
-        os.chdir(dir_path)
-    return dir_path
+        logger.info(f"Changing current worktree: {dir_path.name}")
+        return dir_path
 
 
 def cd_bare(repo: Repo) -> str:
     bare_path = get_bare_worktree_path(repo)
     logger.info(f"Changing to bare directory: {bare_path}")
-    os.chdir(bare_path)
     return bare_path
 
 
@@ -104,15 +109,15 @@ def main() -> None:
     repo = get_repo()
 
     if args.command == "list":
-        list_worktrees(repo)
+        print(list_worktrees(repo), file=sys.stderr)
     elif args.command == "bare":
-        cd_bare(repo)
+        print(cd_bare(repo))
     elif args.command == "add":
-        add_worktree(args, repo)
+        print(add_worktree(args, repo))
     elif args.command == "remove":
-        remove_worktree(args, repo)
+        print(remove_worktree(args, repo))
     else:
-        switch_worktree(repo)
+        print(switch_worktree(repo))
 
 
 if __name__ == "__main__":
