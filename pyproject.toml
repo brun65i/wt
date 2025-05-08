@@ -7,3 +7,7 @@ requires-python = ">=3.13"
 dependencies = [
     "iterfzf>=1.6.0.60.3",
 ]
+
+[tool.basedpyright]
+allowedUntypedLibraries = ["iterfzf"]
+typeCheckingMode = "standard"

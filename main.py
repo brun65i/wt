@@ -1,11 +1,11 @@
 import argparse
 import logging
 import os
-import subprocess
+import subprocess as sp
 import sys
 from pathlib import Path
 from shutil import which
-from typing import List
+from typing import Optional
 
 from iterfzf import iterfzf
 
@@ -14,26 +14,23 @@ logging.basicConfig(
 )
 
 
-def git(*cmds: str, capture_output: bool = True, cwd: Path = Path.cwd()) -> str | None:
-    git_command = [which("git")]
-    for cmd in cmds:
-        git_command.append(cmd)
-    proc = subprocess.run(
-        git_command, capture_output=capture_output, cwd=cwd, text=True
-    )
-    if capture_output:
-        return proc.stdout
-
-
-def get_bare_worktree_path() -> Path | None:
-    for worktree in git("worktree", "list").splitlines():
-        if "(bare)" in worktree:
-            return Path(worktree.split()[0])
-    raise ValueError("No bare worktree found")
+def git(*cmds: str, cwd: Optional[Path] = None) -> sp.CompletedProcess:
+    if not cwd:
+        cwd = Path.cwd()
+    git_command = [which("git"), *cmds]
+    proc = sp.run(git_command, capture_output=True, cwd=cwd, text=True, check=True)
+    return proc
 
 
 def list_worktrees() -> str:
-    return git("worktree", "list")
+    return git("worktree", "list").stdout
+
+
+def get_bare_worktree_path() -> Path:
+    for worktree in list_worktrees().splitlines():
+        if "(bare)" in worktree:
+            return Path(worktree.split()[0])
+    raise ValueError("No bare worktree found")
 
 
 def add_worktree(args: argparse.Namespace) -> Path:
@@ -41,23 +38,23 @@ def add_worktree(args: argparse.Namespace) -> Path:
     git("worktree", "add", *args.path, cwd=bare_path)
     worktree_path = bare_path / args.path[0]
     logging.info("Fetching changes")
-    git("fetch", "--all", cwd=worktree_path, capture_output=False)
+    git("fetch", "--all", cwd=worktree_path)
     logging.info("Merging with master")
-    git("merge", "master", cwd=worktree_path, capture_output=False)
+    git("merge", "master", cwd=worktree_path)
     return worktree_path
 
 
-def select_worktree(exclude_bare: bool = True) -> Path | str:
-    worktrees = git("worktree", "list").splitlines()
+def select_worktree(exclude_bare: bool = True) -> Path:
+    worktrees = list_worktrees().splitlines()
     options = [line for line in worktrees if not ("(bare)" in line and exclude_bare)]
     if not options:
         logging.error("No worktrees available.")
-        return ""
+        return Path()
     try:
         choice = iterfzf(options, prompt="Select worktree > ")
-        return Path(choice.split()[0])
+        return Path(choice.split()[0])  # pyright: ignore[reportAttributeAccessIssue, reportOptionalMemberAccess]
     except KeyboardInterrupt:
-        return ""
+        return Path()
 
 
 # TODO: check if there are modified or untracked files before removing
@@ -65,15 +62,15 @@ def remove_worktree(args: argparse.Namespace) -> Path:
     bare_path = get_bare_worktree_path()
     if args.all:
         os.chdir(bare_path)
-        worktrees = git("worktree", "list").splitlines()
+        worktrees = list_worktrees().splitlines()
         for line in worktrees:
-            if "(bare)" in line or "master" in line:
+            if "(bare)" in line:
                 continue
             dir_path = line.split()[0]
             try:
                 logging.info(f"Removing {dir_path}...")
-                git("worktree", "remove", dir_path, capture_output=False)
-            except Exception:
+                git("worktree", "remove", dir_path)
+            except sp.CalledProcessError:
                 logging.exception(
                     f"Failed to remove {dir_path} worktree", exc_info=True
                 )
@@ -83,18 +80,18 @@ def remove_worktree(args: argparse.Namespace) -> Path:
         cwd_path = Path.cwd()
         if dir_path:
             logging.info(f"Removing worktree: {dir_path}")
-            git("worktree", "remove", dir_path, capture_output=False)
+            git("worktree", "remove", str(dir_path))
             return bare_path if dir_path.name == cwd_path.name else cwd_path
+        return Path()
 
 
 def switch_worktree() -> Path:
     dir_path = select_worktree()
-    if dir_path:
-        logging.info(f"Changing current worktree: {dir_path.name}")
-        return dir_path
+    logging.info(f"Changing current worktree: {dir_path.name}")
+    return dir_path
 
 
-def cd_bare() -> str:
+def cd_bare() -> Path:
     bare_path = get_bare_worktree_path()
     logging.info(f"Changing to bare directory: {bare_path}")
     return bare_path
