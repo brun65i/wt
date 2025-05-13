@@ -14,6 +14,10 @@ logging.basicConfig(
 )
 
 
+def path_is_truthy(path: Path) -> bool:
+    return not str(path) == "."
+
+
 def git(*cmds: str, cwd: Optional[Path] = None) -> sp.CompletedProcess:
     if not cwd:
         cwd = Path.cwd()
@@ -78,7 +82,7 @@ def remove_worktree(args: argparse.Namespace) -> Path:
     else:
         dir_path = select_worktree()
         cwd_path = Path.cwd()
-        if dir_path:
+        if path_is_truthy(dir_path):
             logging.info(f"Removing worktree: {dir_path}")
             git("worktree", "remove", str(dir_path))
             return bare_path if dir_path.name == cwd_path.name else cwd_path
@@ -87,7 +91,8 @@ def remove_worktree(args: argparse.Namespace) -> Path:
 
 def switch_worktree() -> Path:
     dir_path = select_worktree()
-    logging.info(f"Changing current worktree: {dir_path.name}")
+    if path_is_truthy(dir_path):
+        logging.info(f"Changing current worktree: {dir_path.name}")
     return dir_path
 
 

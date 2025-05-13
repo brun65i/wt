@@ -5,7 +5,7 @@ description = "Simple tool to work with git worktrees"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "iterfzf>=1.6.0.60.3",
+    "iterfzf>=1.7.0.62.0",
 ]
 
 [tool.basedpyright]
