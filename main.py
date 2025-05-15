@@ -137,6 +137,10 @@ def cd_bare() -> Path:
 
 
 def main() -> None:
+    if not is_inside_git_repo():
+        logging.error("Not a git repository")
+        sys.exit(128)
+
     parser = argparse.ArgumentParser(description="Manage Git worktrees.")
     subparsers = parser.add_subparsers(dest="command")
 
@@ -159,10 +163,6 @@ def main() -> None:
     )
 
     args = parser.parse_args()
-
-    if not is_inside_git_repo():
-        logging.error("Not a git repository")
-        sys.exit(128)
 
     if args.command == "list":
         print(list_worktrees(), file=sys.stderr)
